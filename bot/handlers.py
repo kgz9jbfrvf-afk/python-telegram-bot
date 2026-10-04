@@ -2,6 +2,9 @@
 
 import logging
 
+import asyncio
+from html.parser import HTMLParser
+from urllib.request import Request, urlopen
 from telegram import ReplyKeyboardMarkup, Update
 from telegram.error import Conflict, NetworkError, TimedOut
 from telegram.ext import Application, CommandHandler, ContextTypes, MessageHandler, filters
@@ -24,14 +27,16 @@ BOT_COMMANDS = (
     ("help", "Show help"),
     ("about", "Show bot information"),
     ("ping", "Check bot status"),
+    ("news", "Latest Minecraft news"),
 )
 
 MENU_HELP = "Help"
 MENU_ABOUT = "About"
-MENU_PING = "Ping"
+MENU_PING = "Ping" 
 
+MENU_NEWS = "📰 Новости"
 MAIN_MENU_KEYBOARD = ReplyKeyboardMarkup(
-    [[MENU_HELP, MENU_ABOUT], [MENU_PING]],
+    [[MENU_NEWS], [MENU_HELP, MENU_ABOUT], [MENU_PING]],,
     resize_keyboard=True,
     is_persistent=True,
     input_field_placeholder="Choose a menu item",
@@ -111,12 +116,118 @@ async def menu_button(update: Update, context: ContextTypes.DEFAULT_TYPE) -> Non
         return
 
     text = message.text.strip()
-    if text == MENU_HELP:
+  if text == MENU_NEWS:
+        await news(update, context)
+    elif text == MENU_HELP:
         await help_command(update, context)
     elif text == MENU_ABOUT:
         await about(update, context)
     elif text == MENU_PING:
         await ping(update, context)
+
+class MinecraftNewsParser(HTMLParser):
+    def __init__(self):
+        super().__init__()
+        self.links = []
+        self.current_href = None
+        self.current_text = []
+
+    def handle_starttag(self, tag, attrs):
+        if tag != "a":
+            return
+
+        attrs_dict = dict(attrs)
+        href = attrs_dict.get("href")
+
+        if href and "/article/" in href:
+            self.current_href = href
+            self.current_text = []
+
+    def handle_data(self, data):
+        if self.current_href:
+            self.current_text.append(data)
+
+    def handle_endtag(self, tag):
+        if tag == "a" and self.current_href:
+            title = " ".join(" ".join(self.current_text).split())
+
+            if title:
+                if self.current_href.startswith("/"):
+                    url = "https://www.minecraft.net" + self.current_href
+                else:
+                    url = self.current_href
+
+                if url not in [item[1] for item in self.links]:
+                    self.links.append((title, url))
+
+            self.current_href = None
+            self.current_text = []
+
+
+def _fetch_minecraft_news():
+    url = "https://www.minecraft.net/en-us/article"
+
+    request = Request(
+        url,
+        headers={
+            "User-Agent": "Mozilla/5.0 MinecraftNewsBot/1.0"
+        },
+    )
+
+    with urlopen(request, timeout=15) as response:
+        html = response.read().decode("utf-8", errors="replace")
+
+    parser = MinecraftNewsParser()
+    parser.feed(html)
+
+    return parser.links[:5]
+
+
+async def news(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    del context
+
+    message = update.effective_message
+
+    if message is None:
+        return
+
+    await message.reply_text(
+        "📰 Ищу последние новости Minecraft..."
+    )
+
+    try:
+        articles = await asyncio.to_thread(
+            _fetch_minecraft_news
+        )
+
+    except Exception:
+        logger.exception("Failed to fetch Minecraft news")
+
+        await message.reply_text(
+            "Не удалось получить новости сейчас 😔\n"
+            "Попробуй ещё раз через минуту."
+        )
+
+        return
+
+    if not articles:
+        await message.reply_text(
+            "Пока не нашёл свежие новости 😔"
+        )
+        return
+
+    text = "📰 <b>Последние новости Minecraft</b>\n\n"
+
+    for i, (title, url) in enumerate(articles, 1):
+        text += f'{i}. <a href="{url}">{title}</a>\n\n'
+
+    text += "Источник: Minecraft.net"
+
+    await message.reply_text(
+        text,
+        parse_mode="HTML",
+        disable_web_page_preview=True,
+    )
 
 
 async def echo_message(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
@@ -167,12 +278,17 @@ async def set_bot_commands(application: Application) -> None:
 
 
 def register_handlers(application: Application) -> None:
+    application.add_handler(CommandHandler("news", news))
     application.add_handler(CommandHandler("start", start))
     application.add_handler(CommandHandler("help", help_command))
     application.add_handler(CommandHandler("about", about))
     application.add_handler(CommandHandler("ping", ping))
     application.add_handler(MessageHandler(filters.COMMAND, unknown_command))
     application.add_handler(
-        MessageHandler(filters.Regex(f"^({MENU_HELP}|{MENU_ABOUT}|{MENU_PING})$"), menu_button)
-    )
+        MessageHandler(
+    filters.Regex(
+        f"^({MENU_NEWS}|{MENU_HELP}|{MENU_ABOUT}|{MENU_PING})$"
+    ),
+    menu_button,
+)
     application.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, echo_message))
