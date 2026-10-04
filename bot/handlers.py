@@ -36,7 +36,7 @@ MENU_PING = "Ping"
 
 MENU_NEWS = "📰 Новости"
 MAIN_MENU_KEYBOARD = ReplyKeyboardMarkup(
-    [[MENU_NEWS], [MENU_HELP, MENU_ABOUT], [MENU_PING]],,
+    [[MENU_NEWS], [MENU_HELP, MENU_ABOUT], [MENU_PING]],
     resize_keyboard=True,
     is_persistent=True,
     input_field_placeholder="Choose a menu item",
@@ -116,7 +116,7 @@ async def menu_button(update: Update, context: ContextTypes.DEFAULT_TYPE) -> Non
         return
 
     text = message.text.strip()
-  if text == MENU_NEWS:
+    if text == MENU_NEWS:
         await news(update, context)
     elif text == MENU_HELP:
         await help_command(update, context)
@@ -286,9 +286,10 @@ def register_handlers(application: Application) -> None:
     application.add_handler(MessageHandler(filters.COMMAND, unknown_command))
     application.add_handler(
         MessageHandler(
-    filters.Regex(
-        f"^({MENU_NEWS}|{MENU_HELP}|{MENU_ABOUT}|{MENU_PING})$"
-    ),
-    menu_button,
-)
+            filters.Regex(
+                f"^({MENU_NEWS}|{MENU_HELP}|{MENU_ABOUT}|{MENU_PING})$"
+            ),
+            menu_button,
+        )
+    )
     application.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, echo_message))
