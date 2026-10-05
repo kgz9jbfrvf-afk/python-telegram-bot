@@ -368,14 +368,14 @@ async def mention_ai(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None
             "Позови меня и напиши вопрос 😄"
         )
         return
-        user = update.effective_user
+    user = update.effective_user
 
-        user_name = user.full_name if user else "Неизвестный игрок"
-        user_id = user.id if user else 0
-        username = f"@{user.username}" if user and user.username else "нет username"
-        chat_id = message.chat_id
-        history = await get_ai_memory(context, chat_id)
-        user_profile = await get_user_profile(context, chat_id, user_id)
+    user_name = user.full_name if user else "Неизвестный игрок"
+    user_id = user.id if user else 0
+    username = f"@{user.username}" if user and user.username else "нет username"
+    chat_id = message.chat_id
+    history = await get_ai_memory(context, chat_id)
+    user_profile = await get_user_profile(context, chat_id, user_id)
 
     history.append({
     "role": "user",
