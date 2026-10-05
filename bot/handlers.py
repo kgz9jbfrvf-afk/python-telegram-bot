@@ -332,7 +332,7 @@ async def mention_ai(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None
         )
         return
         
-            chat_id = message.chat_id
+    chat_id = message.chat_id
     history = await get_ai_memory(context, chat_id)
 
     history.append({
