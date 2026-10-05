@@ -167,29 +167,40 @@ class MinecraftNewsParser(HTMLParser):
 
 
 def _fetch_minecraft_news():
-    url = "https://mcbe.live/api/news?limit=5"
+    url = (
+        "https://news.google.com/rss/search?"
+        "q=site%3Aminecraft.net%2Fen-us%2Farticle%20Minecraft"
+        "&hl=en-US&gl=US&ceid=US%3Aen"
+    )
 
     request = Request(
         url,
         headers={
             "User-Agent": "MinecraftTelegramBot/1.0",
-            "Accept": "application/json",
+            "Accept": "application/rss+xml, application/xml",
         },
     )
 
     with urlopen(request, timeout=10) as response:
-        data = json.loads(response.read().decode("utf-8"))
+        data = response.read()
 
-    items = data.get("data", [])
+    root = ET.fromstring(data)
     articles = []
 
-    for item in items:
-        title = item.get("title")
-        slug = item.get("slug")
-        link = item.get("url") or item.get("link")
+    for item in root.findall(".//item"):
+        title = (item.findtext("title") or "").strip()
+        link = (item.findtext("link") or "").strip()
 
-        if not link and slug:
-            link = f"https://www.mcbe.live/news/{slug}"
+        title = (
+            title.replace("&", "&amp;")
+            .replace("<", "&lt;")
+            .replace(">", "&gt;")
+        )
+
+        link = (
+            link.replace("&", "&amp;")
+            .replace('"', "&quot;")
+        )
 
         if title and link:
             articles.append((title, link))
