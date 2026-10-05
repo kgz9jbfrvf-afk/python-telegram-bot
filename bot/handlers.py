@@ -252,6 +252,52 @@ async def ask(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         await message.reply_text(
             "Не удалось получить ответ от ИИ 😔"
         )
+async def mention_ai(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    message = update.effective_message
+
+    if message is None or not message.text:
+        return
+
+    bot_username = context.bot.username
+
+    if not bot_username:
+        return
+
+    mention = f"@{bot_username}"
+
+    if mention.lower() not in message.text.lower():
+        return
+
+    prompt = message.text.replace(mention, "", 1).strip()
+
+    if not prompt:
+        await message.reply_text(
+            "Позови меня и напиши вопрос 😄"
+        )
+        return
+
+    try:
+        client = OpenAI()
+
+        response = await asyncio.to_thread(
+            client.responses.create,
+            model="gpt-6-luna",
+            input=prompt,
+        )
+
+        answer = response.output_text.strip()
+
+        if not answer:
+            answer = "Не получилось сформировать ответ 😕"
+
+        await message.reply_text(answer)
+
+    except Exception:
+        logger.exception("OpenAI mention request failed")
+
+        await message.reply_text(
+            "Не удалось получить ответ от ИИ 😔"
+        )
 
 async def unknown_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     del context
@@ -289,6 +335,7 @@ def register_handlers(application: Application) -> None:
     application.add_handler(CommandHandler("help", help_command))
     application.add_handler(CommandHandler("about", about))
     application.add_handler(CommandHandler("ping", ping))
+    application.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, mention_ai))
     application.add_handler(MessageHandler(filters.COMMAND, unknown_command))
     application.add_handler(
         MessageHandler(
