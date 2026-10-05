@@ -167,6 +167,54 @@ async def save_user_profile(context, chat_id, user_id, profile):
     except Exception:
         logger.exception("Failed to save user profile")
         
+async def update_user_profile(
+    context,
+    chat_id,
+    user_id,
+    current_profile,
+    message_text,
+):
+    if context.bot_data.get(REDIS_KEY) is None:
+        return current_profile
+
+    memory_input = (
+        f"Текущий профиль:\n"
+        f"{current_profile or 'Пока фактов нет'}\n\n"
+        f"Новое сообщение участника:\n"
+        f"{message_text}"
+    )
+
+    try:
+        client = OpenAI()
+
+        response = await asyncio.to_thread(
+            client.responses.create,
+            model="gpt-6-luna",
+            instructions=PROFILE_MEMORY_PROMPT,
+            input=memory_input,
+        )
+
+        updated_profile = response.output_text.strip()
+
+        if not updated_profile:
+            return current_profile
+
+        updated_profile = updated_profile[:4000]
+
+        if updated_profile != current_profile:
+            await save_user_profile(
+                context,
+                chat_id,
+                user_id,
+                updated_profile,
+            )
+
+        return updated_profile
+
+    except Exception:
+        logger.exception("Failed to update user profile")
+        return current_profile
+        
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     message = update.effective_message
     user = update.effective_user
