@@ -3,6 +3,7 @@
 import logging
 
 import asyncio 
+import json
 import xml.etree.ElementTree as ET
 from urllib.request import Request, urlopen
 from openai import OpenAI
@@ -18,6 +19,8 @@ logger = logging.getLogger(__name__)
 # Keys used to read shared connections from Application.bot_data.
 DB_KEY = "db"
 REDIS_KEY = "redis"
+AI_MEMORY_LIMIT = 12
+AI_MEMORY_PREFIX = "redstone:memory:"
 REDSTONE_PROMPT = """
 Ты — Редстоун ИИ, помощник нашей компании друзей в Telegram-группе Minecraft Realm.
 
@@ -66,6 +69,40 @@ HELP_TEXT = """Команды:
 /help - Помощь
 /about - О боте
 /ping - Проверить работу бота"""
+
+async def get_ai_memory(context, chat_id):
+    client = context.bot_data.get(REDIS_KEY)
+    if client is None:
+        return []
+
+    key = f"{AI_MEMORY_PREFIX}{chat_id}"
+
+    try:
+        data = await client.get(key)
+        if not data:
+            return []
+
+        if isinstance(data, bytes):
+            data = data.decode("utf-8")
+
+        return json.loads(data)
+    except Exception:
+        logger.exception("Failed to load AI memory")
+        return []
+
+
+async def save_ai_memory(context, chat_id, history):
+    client = context.bot_data.get(REDIS_KEY)
+    if client is None:
+        return
+
+    key = f"{AI_MEMORY_PREFIX}{chat_id}"
+    history = history[-AI_MEMORY_LIMIT:]
+
+    try:
+        await client.set(key, json.dumps(history, ensure_ascii=False))
+    except Exception:
+        logger.exception("Failed to save AI memory")
 
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     message = update.effective_message
@@ -294,6 +331,14 @@ async def mention_ai(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None
             "Позови меня и напиши вопрос 😄"
         )
         return
+        
+            chat_id = message.chat_id
+    history = await get_ai_memory(context, chat_id)
+
+    history.append({
+        "role": "user",
+        "content": prompt
+    })
 
     try:
         client = OpenAI()
@@ -302,13 +347,20 @@ async def mention_ai(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None
             client.responses.create,
             model="gpt-6-luna",
             instructions=REDSTONE_PROMPT,
-            input=prompt,
+            input=history,
         )
 
         answer = response.output_text.strip()
 
         if not answer:
             answer = "Не получилось сформировать ответ 😕"
+                   
+                     history.append({
+            "role": "assistant",
+            "content": answer
+        })
+
+        await save_ai_memory(context, chat_id, history)
 
         await message.reply_text(answer)
 
