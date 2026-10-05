@@ -2,7 +2,8 @@
 
 import logging
 
-import asyncio
+import asyncio 
+import xml.etree.ElementTree as ET
 from html.parser import HTMLParser
 from urllib.request import Request, urlopen
 from telegram import ReplyKeyboardMarkup, Update
@@ -165,22 +166,30 @@ class MinecraftNewsParser(HTMLParser):
 
 
 def _fetch_minecraft_news():
-    url = "https://www.minecraft.net/en-us/article"
+    url = "https://mcbe.news/news/official/rss.xml"
 
     request = Request(
         url,
-        headers={
-            "User-Agent": "Mozilla/5.0 MinecraftNewsBot/1.0"
-        },
+        headers={"User-Agent": "MinecraftTelegramBot/1.0"},
     )
 
-    with urlopen(request, timeout=15) as response:
-        html = response.read().decode("utf-8", errors="replace")
+    with urlopen(request, timeout=10) as response:
+        data = response.read()
 
-    parser = MinecraftNewsParser()
-    parser.feed(html)
+    root = ET.fromstring(data)
+    articles = []
 
-    return parser.links[:5]
+    for item in root.findall(".//item"):
+        title = (item.findtext("title") or "").strip()
+        link = (item.findtext("link") or "").strip()
+
+        if title and link:
+            articles.append((title, link))
+
+        if len(articles) >= 5:
+            break
+
+    return articles
 
 
 async def news(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
