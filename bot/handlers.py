@@ -3,6 +3,7 @@
 import logging
 
 import asyncio 
+import json
 import xml.etree.ElementTree as ET
 from html.parser import HTMLParser
 from urllib.request import Request, urlopen
@@ -166,22 +167,29 @@ class MinecraftNewsParser(HTMLParser):
 
 
 def _fetch_minecraft_news():
-    url = "https://mcbe.news/news/official/rss.xml"
+    url = "https://mcbe.live/api/news?limit=5"
 
     request = Request(
         url,
-        headers={"User-Agent": "MinecraftTelegramBot/1.0"},
+        headers={
+            "User-Agent": "MinecraftTelegramBot/1.0",
+            "Accept": "application/json",
+        },
     )
 
     with urlopen(request, timeout=10) as response:
-        data = response.read()
+        data = json.loads(response.read().decode("utf-8"))
 
-    root = ET.fromstring(data)
+    items = data.get("data", [])
     articles = []
 
-    for item in root.findall(".//item"):
-        title = (item.findtext("title") or "").strip()
-        link = (item.findtext("link") or "").strip()
+    for item in items:
+        title = item.get("title")
+        slug = item.get("slug")
+        link = item.get("url") or item.get("link")
+
+        if not link and slug:
+            link = f"https://www.mcbe.live/news/{slug}"
 
         if title and link:
             articles.append((title, link))
