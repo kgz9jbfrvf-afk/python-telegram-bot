@@ -355,7 +355,7 @@ async def mention_ai(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None
         if not answer:
             answer = "Не получилось сформировать ответ 😕"
                    
-                     history.append({
+        history.append({
             "role": "assistant",
             "content": answer
         })
