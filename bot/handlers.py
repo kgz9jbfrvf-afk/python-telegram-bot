@@ -46,8 +46,6 @@ HELP_TEXT = """Команды:
 /about - О боте
 /ping - Проверить работу бота"""
 
-Send a normal text message and the bot will echo it back."""
-
 
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     message = update.effective_message
