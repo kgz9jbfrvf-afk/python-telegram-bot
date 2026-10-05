@@ -412,7 +412,7 @@ async def ask(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
             answer = "Не получилось сформировать ответ 😕"
 
         await message.reply_text(answer)
-
+        
     except Exception:
         logger.exception("OpenAI request failed")
 
@@ -484,6 +484,14 @@ async def mention_ai(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None
         })
 
         await save_ai_memory(context, chat_id, history)
+        
+        await update_user_profile(
+    context,
+    chat_id,
+    user_id,
+    user_profile,
+    prompt,
+)
 
         await message.reply_text(answer)
 
