@@ -320,4 +320,3 @@ def register_handlers(application: Application) -> None:
             menu_button,
         )
     )
-    application.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, echo_message))
