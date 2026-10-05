@@ -3,9 +3,7 @@
 import logging
 
 import asyncio 
-import json
 import xml.etree.ElementTree as ET
-from html.parser import HTMLParser
 from urllib.request import Request, urlopen
 from telegram import ReplyKeyboardMarkup, Update
 from telegram.error import Conflict, NetworkError, TimedOut
@@ -44,11 +42,12 @@ MAIN_MENU_KEYBOARD = ReplyKeyboardMarkup(
     input_field_placeholder="Choose a menu item",
 )
 
-HELP_TEXT = """Available commands:
-/start - Start the bot
-/help - Show help
-/about - Show bot information
-/ping - Check bot status
+HELP_TEXT = """Команды:
+/start - Главное меню
+/news - Последние новости Minecraft
+/help - Помощь
+/about - О боте
+/ping - Проверить работу бота"""
 
 Send a normal text message and the bot will echo it back."""
 
@@ -126,44 +125,6 @@ async def menu_button(update: Update, context: ContextTypes.DEFAULT_TYPE) -> Non
         await about(update, context)
     elif text == MENU_PING:
         await ping(update, context)
-
-class MinecraftNewsParser(HTMLParser):
-    def __init__(self):
-        super().__init__()
-        self.links = []
-        self.current_href = None
-        self.current_text = []
-
-    def handle_starttag(self, tag, attrs):
-        if tag != "a":
-            return
-
-        attrs_dict = dict(attrs)
-        href = attrs_dict.get("href")
-
-        if href and "/article/" in href:
-            self.current_href = href
-            self.current_text = []
-
-    def handle_data(self, data):
-        if self.current_href:
-            self.current_text.append(data)
-
-    def handle_endtag(self, tag):
-        if tag == "a" and self.current_href:
-            title = " ".join(" ".join(self.current_text).split())
-
-            if title:
-                if self.current_href.startswith("/"):
-                    url = "https://www.minecraft.net" + self.current_href
-                else:
-                    url = self.current_href
-
-                if url not in [item[1] for item in self.links]:
-                    self.links.append((title, url))
-
-            self.current_href = None
-            self.current_text = []
 
 
 def _fetch_minecraft_news():
@@ -258,19 +219,7 @@ async def news(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     )
 
 
-async def echo_message(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    message = update.effective_message
-    user = update.effective_user
-    if message is None or not message.text or user is None:
-        return
 
-    # Track how many messages each user has sent using a Redis counter, falling
-    # back to an in-memory counter when Redis is unavailable.
-    client = context.bot_data.get(REDIS_KEY)
-    if client is not None:
-        count = await cache.increment_message_count(client, user.id)
-    else:
-        count = _LOCAL_MESSAGE_COUNTS[user.id] = _LOCAL_MESSAGE_COUNTS.get(user.id, 0) + 1
     await message.reply_text(f"You sent (#{count}):\n{message.text}")
 
 
@@ -279,8 +228,6 @@ async def unknown_command(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
     message = update.effective_message
     if message is None:
         return
-
-    await message.reply_text("Unknown command. Type /help for assistance.")
 
 
 async def error_handler(update: object, context: ContextTypes.DEFAULT_TYPE) -> None:
