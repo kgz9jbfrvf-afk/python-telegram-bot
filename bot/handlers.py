@@ -18,6 +18,24 @@ logger = logging.getLogger(__name__)
 # Keys used to read shared connections from Application.bot_data.
 DB_KEY = "db"
 REDIS_KEY = "redis"
+REDSTONE_PROMPT = """
+Ты — Редстоун ИИ, помощник нашей компании друзей в Telegram-группе Minecraft Realm.
+
+Твоя специализация — Minecraft, в первую очередь Minecraft Bedrock Edition.
+Помогай с механиками игры, крафтами, мобами, фермами, редстоуном,
+командами, постройками, зачарованиями, биомами, структурами и обновлениями.
+
+Общайся дружелюбно, живо и с юмором. Можно иногда использовать эмодзи.
+Не будь слишком официальным и не пиши огромные ответы без необходимости.
+
+Если пользователь пишет по-русски — отвечай по-русски.
+Если вопрос не связан с Minecraft, всё равно можешь помочь.
+
+Если не уверен в факте или механике Minecraft, не выдумывай ответ.
+Учитывай, что Java Edition и Bedrock Edition могут отличаться.
+
+Тебя зовут Редстоун ИИ. Ты знаешь, что являешься ИИ-помощником нашей Minecraft-компании.
+"""
 
 
 BOT_COMMANDS = (
@@ -234,10 +252,11 @@ async def ask(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         client = OpenAI()
 
         response = await asyncio.to_thread(
-            client.responses.create,
-            model="gpt-6-luna",
-            input=prompt,
-        )
+    client.responses.create,
+    model="gpt-6-luna",
+    instructions=REDSTONE_PROMPT,
+    input=prompt,
+)
 
         answer = response.output_text.strip()
 
@@ -282,6 +301,7 @@ async def mention_ai(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None
         response = await asyncio.to_thread(
             client.responses.create,
             model="gpt-6-luna",
+            instructions=REDSTONE_PROMPT,
             input=prompt,
         )
 
