@@ -103,7 +103,44 @@ async def save_ai_memory(context, chat_id, history):
         await client.set(key, json.dumps(history, ensure_ascii=False))
     except Exception:
         logger.exception("Failed to save AI memory")
+        
+        
 
+async def get_user_profile(context, chat_id, user_id):
+    client = context.bot_data.get(REDIS_KEY)
+    if client is None:
+        return ""
+
+    key = f"redstone:profile:{chat_id}:{user_id}"
+
+    try:
+        data = await client.get(key)
+        if not data:
+            return ""
+
+        if isinstance(data, bytes):
+            data = data.decode("utf-8")
+
+        return data
+
+    except Exception:
+        logger.exception("Failed to load user profile")
+        return ""
+
+
+async def save_user_profile(context, chat_id, user_id, profile):
+    client = context.bot_data.get(REDIS_KEY)
+    if client is None:
+        return
+
+    key = f"redstone:profile:{chat_id}:{user_id}"
+
+    try:
+        await client.set(key, profile)
+
+    except Exception:
+        logger.exception("Failed to save user profile")
+        
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     message = update.effective_message
     user = update.effective_user
@@ -331,14 +368,26 @@ async def mention_ai(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None
             "Позови меня и напиши вопрос 😄"
         )
         return
-        
-    chat_id = message.chat_id
-    history = await get_ai_memory(context, chat_id)
+        user = update.effective_user
+
+        user_name = user.full_name if user else "Неизвестный игрок"
+        user_id = user.id if user else 0
+        username = f"@{user.username}" if user and user.username else "нет username"
+        chat_id = message.chat_id
+        history = await get_ai_memory(context, chat_id)
+        user_profile = await get_user_profile(context, chat_id, user_id)
 
     history.append({
-        "role": "user",
-        "content": prompt
-    })
+    "role": "user",
+    "content": (
+        f"Сообщение написал участник Telegram:\n"
+        f"Имя: {user_name}\n"
+        f"Username: {username}\n"
+        f"User ID: {user_id}\n\n"
+        f"Долговременная память об этом участнике:\n{user_profile or 'Пока фактов нет'}\n\n"
+        f"Сообщение: {prompt}"
+    )
+})
 
     try:
         client = OpenAI()
