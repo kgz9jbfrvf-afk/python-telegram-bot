@@ -18,9 +18,6 @@ logger = logging.getLogger(__name__)
 DB_KEY = "db"
 REDIS_KEY = "redis"
 
-# In-memory fallback for the per-user message counter when Redis is unavailable.
-# Process-local and non-persistent, but keeps the feature working for local testing.
-_LOCAL_MESSAGE_COUNTS: dict[int, int] = {}
 
 BOT_COMMANDS = (
     ("start", "Show the main menu"),
