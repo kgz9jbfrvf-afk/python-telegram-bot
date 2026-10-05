@@ -5,6 +5,7 @@ import logging
 import asyncio 
 import xml.etree.ElementTree as ET
 from urllib.request import Request, urlopen
+from openai import OpenAI
 from telegram import ReplyKeyboardMarkup, Update
 from telegram.error import Conflict, NetworkError, TimedOut
 from telegram.ext import Application, CommandHandler, ContextTypes, MessageHandler, filters
@@ -25,6 +26,7 @@ BOT_COMMANDS = (
     ("about", "Show bot information"),
     ("ping", "Check bot status"),
     ("news", "Latest Minecraft news"),
+    ("ask", "Ask AI"),
 )
 
 MENU_HELP = "Help"
@@ -42,10 +44,10 @@ MAIN_MENU_KEYBOARD = ReplyKeyboardMarkup(
 HELP_TEXT = """Команды:
 /start - Главное меню
 /news - Последние новости Minecraft
+/ask - Спросить ИИ
 /help - Помощь
 /about - О боте
 /ping - Проверить работу бота"""
-
 
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     message = update.effective_message
@@ -213,10 +215,43 @@ async def news(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         disable_web_page_preview=True,
     )
 
+async def ask(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    message = update.effective_message
 
+    if message is None:
+        return
 
-    await message.reply_text(f"You sent (#{count}):\n{message.text}")
+    prompt = " ".join(context.args).strip()
 
+    if not prompt:
+        await message.reply_text(
+            "Напиши вопрос после команды.\n"
+            "Например: /ask как найти древний город?"
+        )
+        return
+
+    try:
+        client = OpenAI()
+
+        response = await asyncio.to_thread(
+            client.responses.create,
+            model="gpt-6-luna",
+            input=prompt,
+        )
+
+        answer = response.output_text.strip()
+
+        if not answer:
+            answer = "Не получилось сформировать ответ 😕"
+
+        await message.reply_text(answer)
+
+    except Exception:
+        logger.exception("OpenAI request failed")
+
+        await message.reply_text(
+            "Не удалось получить ответ от ИИ 😔"
+        )
 
 async def unknown_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     del context
@@ -249,6 +284,7 @@ async def set_bot_commands(application: Application) -> None:
 
 def register_handlers(application: Application) -> None:
     application.add_handler(CommandHandler("news", news))
+    application.add_handler(CommandHandler("ask", ask))
     application.add_handler(CommandHandler("start", start))
     application.add_handler(CommandHandler("help", help_command))
     application.add_handler(CommandHandler("about", about))
