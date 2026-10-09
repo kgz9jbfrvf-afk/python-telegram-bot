@@ -12,10 +12,21 @@ from telegram import ReplyKeyboardMarkup, Update
 from telegram.error import Conflict, NetworkError, TimedOut
 from telegram.ext import Application, CommandHandler, ContextTypes, MessageHandler, filters
 
-from bot import cache, db
+from bot import cache, db, game_memory
 
 
 logger = logging.getLogger(__name__)
+
+
+class HumanMessageFilter(filters.MessageFilter):
+    """Reject bots and anonymous/channel senders before any handler runs."""
+
+    def filter(self, message):
+        return bool(message.from_user and not message.from_user.is_bot
+                    and message.sender_chat is None)
+
+
+HUMAN_MESSAGES = HumanMessageFilter()
 
 # Keys used to read shared connections from Application.bot_data.
 DB_KEY = "db"
@@ -75,6 +86,8 @@ BOT_COMMANDS = (
     ("ping", "Check bot status"),
     ("news", "Latest Minecraft news"),
     ("ask", "Ask AI"),
+    ("game_memory", "Show game memory: group or me"),
+    ("forget_game_memory", "Delete game memory: group or me"),
 )
 
 MENU_HELP = "Help"
@@ -95,7 +108,9 @@ HELP_TEXT = """Команды:
 /ask - Спросить ИИ
 /help - Помощь
 /about - О боте
-/ping - Проверить работу бота"""
+/ping - Проверить работу бота
+/game_memory [group|me] - Общая или твоя игровая память
+/forget_game_memory [group|me] - Удалить игровую память (общую — только админ)"""
 
 async def get_ai_memory(context, chat_id):
     client = context.bot_data.get(REDIS_KEY)
@@ -419,7 +434,7 @@ async def news(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
 async def ask(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     message = update.effective_message
 
-    if message is None:
+    if message is None or (update.effective_user and update.effective_user.is_bot):
         return
 
     prompt = " ".join(context.args).strip()
@@ -432,13 +447,18 @@ async def ask(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         return
 
     try:
+        game_context = ""
+        if message.chat.type in ("group", "supergroup") and update.effective_user:
+            game_context = await game_memory.answer_context(
+                context, message.chat_id, update.effective_user.id,
+            )
         client = OpenAI()
 
         response = await asyncio.to_thread(
     client.responses.create,
     model="gpt-6-luna",
     instructions=REDSTONE_PROMPT,
-    input=prompt,
+    input=prompt + game_context,
 )
 
         answer = response.output_text.strip()
@@ -459,6 +479,8 @@ async def mention_ai(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None
 
     if message is None or not message.text:
         return
+    if update.effective_user is None or getattr(update.effective_user, "is_bot", False):
+        return
 
     bot_username = context.bot.username
 
@@ -468,6 +490,7 @@ async def mention_ai(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None
     mention = f"@{bot_username}"
 
     if mention.lower() not in message.text.lower():
+        await game_memory.observe(update, context)
         return
 
     prompt = message.text.replace(mention, "", 1).strip()
@@ -499,12 +522,15 @@ async def mention_ai(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None
 })
 
     try:
+        game_context = ""
+        if getattr(getattr(message, "chat", None), "type", None) in ("group", "supergroup"):
+            game_context = await game_memory.answer_context(context, chat_id, user_id)
         client = OpenAI()
 
         response = await asyncio.to_thread(
             client.responses.create,
             model="gpt-6-luna",
-            instructions=REDSTONE_PROMPT,
+            instructions=REDSTONE_PROMPT + game_context,
             input=history,
         )
 
@@ -567,19 +593,20 @@ async def set_bot_commands(application: Application) -> None:
 
 
 def register_handlers(application: Application) -> None:
-    application.add_handler(CommandHandler("news", news))
-    application.add_handler(CommandHandler("ask", ask))
-    application.add_handler(CommandHandler("start", start))
-    application.add_handler(CommandHandler("help", help_command))
-    application.add_handler(CommandHandler("about", about))
-    application.add_handler(CommandHandler("ping", ping))
+    for command, callback in (
+        ("game_memory", game_memory.show_memory),
+        ("forget_game_memory", game_memory.forget_memory),
+        ("news", news), ("ask", ask), ("start", start),
+        ("help", help_command), ("about", about), ("ping", ping),
+    ):
+        application.add_handler(CommandHandler(command, callback, filters=HUMAN_MESSAGES))
     application.add_handler(
         MessageHandler(
-            filters.Regex(
+            HUMAN_MESSAGES & filters.Regex(
                 f"^({MENU_NEWS}|{MENU_HELP}|{MENU_ABOUT}|{MENU_PING})$"
             ),
             menu_button,
         )
     )
-    application.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, mention_ai))
-    application.add_handler(MessageHandler(filters.COMMAND, unknown_command))
+    application.add_handler(MessageHandler(HUMAN_MESSAGES & filters.TEXT & ~filters.COMMAND, mention_ai))
+    application.add_handler(MessageHandler(HUMAN_MESSAGES & filters.COMMAND, unknown_command))
