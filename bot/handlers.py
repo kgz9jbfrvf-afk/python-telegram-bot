@@ -4,6 +4,7 @@ import logging
 
 import asyncio 
 import json
+import re
 import xml.etree.ElementTree as ET
 from urllib.request import Request, urlopen
 from openai import OpenAI
@@ -167,6 +168,38 @@ async def save_user_profile(context, chat_id, user_id, profile):
     except Exception:
         logger.exception("Failed to save user profile")
         
+def has_personal_memory_candidate(message_text: str) -> bool:
+    """Select explicit self-statements locally; the model still validates facts.
+
+    Question clauses are ignored, but a separate self-statement in the same
+    message can update memory. This intentionally favors skipping ambiguous text.
+    """
+    personal_statement = re.compile(
+        r"\b(?:меня\s+зовут|зови(?:те)?\s+меня|называй(?:те)?\s+меня|"
+        r"у\s+меня\s+(?:есть|теперь|больше\s+нет)|"
+        r"мой|моя|моё|мое|мои|"
+        r"я\s+(?:люблю|обожаю|предпочитаю|увлекаюсь|занимаюсь|"
+        r"строю|построил[аи]?|играю|живу|работаю|учусь)|"
+        r"my\s+(?:name|favorite|favourite|dog|cat|pet|project|base)\b|"
+        r"call\s+me|i\s+(?:have|like|love|prefer|play|live|work|study|"
+        r"am\s+building))\b",
+        re.IGNORECASE,
+    )
+    question_start = re.compile(
+        r"^(?:как|что|где|когда|почему|зачем|кто|какой|какая|какие|"
+        r"можно|можешь|подскажи|расскажи|how|what|where|when|why|"
+        r"who|can|could|do|does|is|are)\b",
+        re.IGNORECASE,
+    )
+    for match in re.finditer(r"([^.!?\n]+)([.!?\n]|$)", message_text):
+        clause = match.group(1).strip()
+        if match.group(2) == "?" or question_start.match(clause):
+            continue
+        if personal_statement.search(clause):
+            return True
+    return False
+
+
 async def update_user_profile(
     context,
     chat_id,
@@ -175,6 +208,8 @@ async def update_user_profile(
     message_text,
 ):
     if context.bot_data.get(REDIS_KEY) is None:
+        return current_profile
+    if not has_personal_memory_candidate(message_text):
         return current_profile
 
     memory_input = (
@@ -538,8 +573,6 @@ def register_handlers(application: Application) -> None:
     application.add_handler(CommandHandler("help", help_command))
     application.add_handler(CommandHandler("about", about))
     application.add_handler(CommandHandler("ping", ping))
-    application.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, mention_ai))
-    application.add_handler(MessageHandler(filters.COMMAND, unknown_command))
     application.add_handler(
         MessageHandler(
             filters.Regex(
@@ -548,3 +581,5 @@ def register_handlers(application: Application) -> None:
             menu_button,
         )
     )
+    application.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, mention_ai))
+    application.add_handler(MessageHandler(filters.COMMAND, unknown_command))
