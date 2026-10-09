@@ -1,6 +1,6 @@
 """Bounded, structured Minecraft facts. Never persist or send ambient text to AI.
 
-The conservative parser deliberately ignores unknown project names and ambiguous
+The conservative parser deliberately ignores implicit project names and ambiguous
 questions. Only allowlisted game concepts, states and world coordinates survive.
 Existing conversational profiles are independent and are never rewritten here.
 """
@@ -8,6 +8,7 @@ Existing conversational profiles are independent and are never rewritten here.
 import json
 import logging
 import re
+import time
 
 logger = logging.getLogger(__name__)
 LIMIT = 40
@@ -29,9 +30,19 @@ OBJECTS = {
     "визер": r"\b(?:визер\w*|wither)\b",
     "элитры": r"\b(?:элитр\w*|elytra)\b",
     "алмазы": r"\b(?:алмаз\w*|diamond\w*)\b",
+    "вишнёвая роща": r"\b(?:вишн[её]в\w*\s+рощ\w*|cherry grove)\b",
+    "джунгли": r"\b(?:джунгл\w*|jungle)\b",
+    "пустыня": r"\b(?:пустын\w*|desert)\b",
+    "выживание": r"\b(?:выживани\w*|survival)\b",
+    "творческий режим": r"\b(?:творческ\w*\s+режим\w*|creative mode)\b",
+    "крипер": r"\b(?:крипер\w*|creeper)\b",
+    "лава": r"\b(?:лав[ауыое]|lava)\b",
+    "редстоун": r"\b(?:редстоун\w*|redstone)\b",
     "проект": r"\b(?:проект\w*|project)\b",
 }
 STATES = {
+    "происшествие": r"\b(?:взорвал\w*|сгорел\w*|утонул\w*|погиб\w*|exploded)\b",
+    "предпочтение": r"\b(?:люблю|обожаю|предпочитаю|любим\w*|love|prefer)\b",
     "план": r"\b(?:планиру\w*|собираюсь|собираемся|хочу|хотим|буду|будем|plan\w*|going to)\b",
     "готово": r"\b(?:построил\w*|закончил\w*|завершил\w*|готов\w*|built|finished|completed)\b",
     "строится": r"\b(?:строю|строим|строится|начинаю|начинаем|building)\b",
@@ -52,11 +63,16 @@ QUESTION = re.compile(
     re.IGNORECASE,
 )
 PERSONAL = re.compile(
-    r"^(?:строю|построил|построила|"
-    r"нашёл|нашел|нашла|планирую|собираюсь|добыл|получил|победил|"
-    r"начинаю)\b|\b(?:я|мой|моя|мои|моё|мое|у меня|i|my)\b", re.IGNORECASE,
+    r"^(?:(?:я\s+)?(?:строю|построил\w*|наш[её]л|нашла|планирую|собираюсь|"
+    r"добыл\w*|получил\w*|победил\w*|начинаю|люблю|обожаю|предпочитаю|"
+    r"сгорел\w*|утонул\w*|погиб\w*|буду)|мой|моя|мои|моё|мое|у меня|"
+    r"i\s+(?:found|built|plan|obtained|defeated|love|prefer|am building)|my)\b",
+    re.IGNORECASE,
 )
-COLLECTIVE = re.compile(r"\b(?:мы|наш\w*|строим|построили|планируем|we|our)\b", re.IGNORECASE)
+COLLECTIVE = re.compile(
+    r"\b(?:мы|наш(?:а|е|ё|и|у|его|ему|ей|им|их|ими|ем)?|строим|построили|планируем|we|our)\b",
+    re.IGNORECASE,
+)
 COORDINATES = re.compile(
     r"(?<![\w.])(-?\d{1,8})\s*[,; ]\s*(-?\d{1,3})\s*[,; ]\s*(-?\d{1,8})(?![\w.])"
 )
@@ -85,6 +101,16 @@ def extract_facts(text: str) -> list[tuple[bool, dict]]:
             continue  # Do not turn negation or hypothetical plans into facts.
         if re.search(r"\b(?:друг|подруга|сказал\w*|говорит|рассказал\w*|said|says|told)\b", clause):
             continue  # Avoid assigning reported facts about someone else to the sender.
+        # Only explicitly labelled building names survive. Quoted free text is
+        # not an instruction and never participates in identifying the object.
+        named = re.search(r'(?:под названием|назвал[аи]?)\s+[«"]([а-яёa-z0-9 -]{1,48})[»"]', clause)
+        if named:
+            clause = clause[:named.start()] + clause[named.end():]
+        # Self ownership requires a first-person assertion, not a later "я видел".
+        if re.search(r"\b(?:он|она|его|её|ее|они)\b", clause):
+            continue
+        if re.search(r"\b(?:я видел|я слышал|я знаю|мне сообщили)\b", clause):
+            continue
         objects = [name for name, pattern in OBJECTS.items() if re.search(pattern, clause)]
         if "проект" in objects:
             if len(objects) > 1:
@@ -93,9 +119,16 @@ def extract_facts(text: str) -> list[tuple[bool, dict]]:
                 continue
         if "железная дорога" in objects and "дорога" in objects:
             objects.remove("дорога")
+        states = [name for name, pattern in STATES.items() if re.search(pattern, clause)]
+        if states == ["происшествие"] and len(objects) == 2:
+            affected = [obj for obj in objects if obj not in ("крипер", "лава")]
+            if len(affected) == 1:
+                objects = affected
         if len(objects) != 1:
             continue  # Coordinates/status cannot safely be assigned to multiple objects.
-        states = [name for name, pattern in STATES.items() if re.search(pattern, clause)]
+        if objects[0] in ("вишнёвая роща", "джунгли", "пустыня", "выживание", "творческий режим"):
+            if not re.search(r"minecraft|bedrock|майнкрафт|биом|режим", clause):
+                continue
         matches = list(COORDINATES.finditer(clause)) + list(NAMED_COORDINATES.finditer(clause))
         if len(matches) > 1:
             continue
@@ -119,6 +152,11 @@ def extract_facts(text: str) -> list[tuple[bool, dict]]:
         dimension = dimensions[0] if dimensions else "не указано"
         fact = {"object": objects[0], "state": states[0] if states else "координаты",
                 "dimension": dimension, "coordinates": coords}
+        if states and states[0] == "предпочтение":
+            if not re.match(r"^(?:я\s+)?(?:люблю|обожаю|предпочитаю|мой\s+любим\w*|i\s+(?:love|prefer))\b", clause):
+                continue
+        if named and objects[0] in ("ферма", "база", "дом", "замок", "проект", "портал", "деревня"):
+            fact["name"] = named.group(1)
         personal = bool(PERSONAL.search(clause)) and not COLLECTIVE.search(clause)
         facts.append((personal, fact))
     return facts[:3]
@@ -126,7 +164,19 @@ def extract_facts(text: str) -> list[tuple[bool, dict]]:
 
 # Exact deduplication, trimming and expiration are atomic, including across workers.
 SAVE_FACT = """
-redis.call('LREM', KEYS[1], 0, ARGV[1])
+local incoming = cjson.decode(ARGV[1])
+incoming.source = nil
+incoming.expires_at = nil
+local signature = cjson.encode(incoming)
+for _, value in ipairs(redis.call('LRANGE', KEYS[1], 0, tonumber(ARGV[2]) - 1)) do
+    local ok, old = pcall(cjson.decode, value)
+    if ok and type(old) == 'table' then
+        local expired = type(old.expires_at) == 'number' and old.expires_at <= tonumber(ARGV[4] or '0')
+        old.source = nil
+        old.expires_at = nil
+        if expired or cjson.encode(old) == signature then redis.call('LREM', KEYS[1], 0, value) end
+    end
+end
 redis.call('LPUSH', KEYS[1], ARGV[1])
 redis.call('LTRIM', KEYS[1], 0, tonumber(ARGV[2]) - 1)
 redis.call('EXPIRE', KEYS[1], tonumber(ARGV[3]))
@@ -135,8 +185,23 @@ return 1
 
 
 def valid_fact(fact) -> bool:
-    if not isinstance(fact, dict) or set(fact) != {"object", "state", "dimension", "coordinates"}:
+    if not isinstance(fact, dict) or not {"object", "state", "dimension", "coordinates"} <= set(fact):
         return False
+    if set(fact) - {"object", "state", "dimension", "coordinates", "name", "source", "expires_at"}:
+        return False
+    if "expires_at" in fact and (type(fact["expires_at"]) is not int or fact["expires_at"] <= time.time()):
+        return False
+    if "name" in fact and (not isinstance(fact["name"], str)
+            or not re.fullmatch(r"[а-яёa-z0-9 -]{1,48}", fact["name"])
+            or SENSITIVE.search(fact["name"])):
+        return False
+    if "source" in fact:
+        source = fact["source"]
+        if (not isinstance(source, dict) or set(source) != {"author_id", "message_id", "ownership"}
+                or type(source["author_id"]) is not int or source["author_id"] <= 0
+                or type(source["message_id"]) is not int or source["message_id"] <= 0
+                or source["ownership"] not in ("self", "collective", "unspecified")):
+            return False
     if not isinstance(fact["object"], str) or fact["object"] not in OBJECTS:
         return False
     if fact["state"] not in (*STATES, "координаты") or fact["dimension"] not in ("не указано", "обычный мир", "незер", "энд"):
@@ -160,8 +225,13 @@ async def observe(update, context) -> None:
         return
     try:
         for personal, fact in facts:
+            fact["expires_at"] = int(time.time()) + TTL
+            if getattr(message, "message_id", None):
+                fact["source"] = {"author_id": user.id, "message_id": message.message_id,
+                                  "ownership": "self" if personal else (
+                                      "collective" if COLLECTIVE.search(message.text) else "unspecified")}
             key = memory_key(message.chat_id, user.id if personal else None)
-            await client.eval(SAVE_FACT, 1, key, json.dumps(fact, ensure_ascii=False), LIMIT, TTL)
+            await client.eval(SAVE_FACT, 1, key, json.dumps(fact, ensure_ascii=False), LIMIT, TTL, int(time.time()))
     except Exception:
         # Do not log Update/text: ambient messages may contain private data.
         logger.warning("Game memory write unavailable")
@@ -183,7 +253,13 @@ async def read_facts(client, chat_id: int, user_id: int | None = None) -> list[d
 def format_fact(fact: dict) -> str:
     coordinates = fact["coordinates"]
     location = ", ".join(map(str, coordinates)) if coordinates else "координаты не указаны"
-    return f"• {fact['object']}: {fact['state']}; {fact['dimension']}; {location}"
+    name = f" «{fact['name']}»" if "name" in fact else ""
+    source = fact.get("source")
+    attribution = ""
+    if source:
+        attribution = (f"; источник: сообщение {source['message_id']}, автор ID {source['author_id']}, "
+                       f"владелец: {source['ownership']} (автор сообщения не обязательно владелец)")
+    return f"• {fact['object']}{name}: {fact['state']}; {fact['dimension']}; {location}{attribution}"
 
 
 async def answer_context(context, chat_id: int, user_id: int) -> str:

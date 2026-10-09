@@ -12,7 +12,7 @@ from telegram import ReplyKeyboardMarkup, Update
 from telegram.error import Conflict, NetworkError, TimedOut
 from telegram.ext import Application, CommandHandler, ContextTypes, MessageHandler, filters
 
-from bot import cache, db, game_memory
+from bot import cache, db, game_memory, activity
 
 
 logger = logging.getLogger(__name__)
@@ -33,24 +33,7 @@ DB_KEY = "db"
 REDIS_KEY = "redis"
 AI_MEMORY_LIMIT = 12
 AI_MEMORY_PREFIX = "redstone:memory:"
-REDSTONE_PROMPT = """
-Ты — Редстоун ИИ, помощник нашей компании друзей в Telegram-группе Minecraft Realm.
-
-Твоя специализация — Minecraft, в первую очередь Minecraft Bedrock Edition.
-Помогай с механиками игры, крафтами, мобами, фермами, редстоуном,
-командами, постройками, зачарованиями, биомами, структурами и обновлениями.
-
-Общайся дружелюбно, живо и с юмором. Можно иногда использовать эмодзи.
-Не будь слишком официальным и не пиши огромные ответы без необходимости.
-
-Если пользователь пишет по-русски — отвечай по-русски.
-Если вопрос не связан с Minecraft, всё равно можешь помочь.
-
-Если не уверен в факте или механике Minecraft, не выдумывай ответ.
-Учитывай, что Java Edition и Bedrock Edition могут отличаться.
-
-Тебя зовут Редстоун ИИ. Ты знаешь, что являешься ИИ-помощником нашей Minecraft-компании.
-"""
+REDSTONE_PROMPT = activity.PERSONALITY
 
 PROFILE_MEMORY_PROMPT = """
 Ты ведёшь краткую долговременную память об одном конкретном участнике Telegram-группы.
@@ -80,6 +63,10 @@ PROFILE_MEMORY_PROMPT = """
 """
 
 BOT_COMMANDS = (
+    ("personality", "Характер Редстоуна"),
+    ("activity_status", "Режим инициативы"),
+    ("activity_on", "Включить инициативу (админ)"),
+    ("activity_off", "Выключить инициативу (админ)"),
     ("start", "Show the main menu"),
     ("help", "Show help"),
     ("about", "Show bot information"),
@@ -103,6 +90,10 @@ MAIN_MENU_KEYBOARD = ReplyKeyboardMarkup(
 )
 
 HELP_TEXT = """Команды:
+/personality - Характер Редстоуна
+/activity_status - Режим инициативы (по умолчанию выключена)
+/activity_on - Включить инициативу (администратор)
+/activity_off - Выключить инициативу (администратор)
 /start - Главное меню
 /news - Последние новости Minecraft
 /ask - Спросить ИИ
@@ -224,6 +215,8 @@ async def update_user_profile(
 ):
     if context.bot_data.get(REDIS_KEY) is None:
         return current_profile
+    if game_memory.SENSITIVE.search(message_text):
+        return current_profile
     if not has_personal_memory_candidate(message_text):
         return current_profile
 
@@ -241,7 +234,9 @@ async def update_user_profile(
             client.responses.create,
             model="gpt-6-luna",
             instructions=PROFILE_MEMORY_PROMPT,
-            input=memory_input,
+            input=memory_input[:6000],
+            store=False,
+            max_output_tokens=800,
         )
 
         updated_profile = response.output_text.strip()
@@ -458,7 +453,9 @@ async def ask(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     client.responses.create,
     model="gpt-6-luna",
     instructions=REDSTONE_PROMPT,
-    input=prompt + game_context,
+    input=prompt[:3000] + game_context[:3000],
+    store=False,
+    max_output_tokens=1000,
 )
 
         answer = response.output_text.strip()
@@ -489,11 +486,13 @@ async def mention_ai(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None
 
     mention = f"@{bot_username}"
 
-    if mention.lower() not in message.text.lower():
+    mention_pattern = re.escape(mention) + r"(?![A-Za-z0-9_])"
+    if not re.search(mention_pattern, message.text, re.IGNORECASE):
         await game_memory.observe(update, context)
+        await activity.maybe_reply(update, context)
         return
 
-    prompt = message.text.replace(mention, "", 1).strip()
+    prompt = re.sub(mention_pattern, "", message.text, count=1, flags=re.IGNORECASE).strip()
 
     if not prompt:
         await message.reply_text(
@@ -530,8 +529,11 @@ async def mention_ai(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None
         response = await asyncio.to_thread(
             client.responses.create,
             model="gpt-6-luna",
-            instructions=REDSTONE_PROMPT + game_context,
-            input=history,
+            instructions=REDSTONE_PROMPT + game_context[:3000],
+            input=[{"role": item["role"], "content": str(item["content"])[:1000]}
+                   for item in history[-AI_MEMORY_LIMIT:]],
+            store=False,
+            max_output_tokens=1000,
         )
 
         answer = response.output_text.strip()
@@ -580,7 +582,7 @@ async def error_handler(update: object, context: ContextTypes.DEFAULT_TYPE) -> N
         logger.warning("Transient Telegram error: %s", error)
         return
 
-    logger.exception("Error while processing update: %s", update, exc_info=error)
+    logger.error("Error while processing Telegram update (%s)", type(error).__name__)
 
     if isinstance(update, Update) and update.effective_message:
         await update.effective_message.reply_text(
@@ -594,6 +596,10 @@ async def set_bot_commands(application: Application) -> None:
 
 def register_handlers(application: Application) -> None:
     for command, callback in (
+        ("personality", activity.personality),
+        ("activity_status", activity.activity_status),
+        ("activity_on", activity.activity_on),
+        ("activity_off", activity.activity_off),
         ("game_memory", game_memory.show_memory),
         ("forget_game_memory", game_memory.forget_memory),
         ("news", news), ("ask", ask), ("start", start),
