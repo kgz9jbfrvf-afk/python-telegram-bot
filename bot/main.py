@@ -5,7 +5,7 @@ import logging
 from telegram import Update
 from telegram.ext import Application, ApplicationBuilder
 
-from bot import cache, db
+from bot import cache, db, facts
 from bot.config import Settings
 from bot.handlers import (
     DB_KEY,
@@ -71,6 +71,7 @@ def build_application(settings: Settings) -> Application:
         .post_shutdown(on_shutdown)
         .build()
     )
+    facts.configure(application, settings.facts_times, settings.facts_timezone)
     register_handlers(application)
     application.add_error_handler(error_handler)
     return application

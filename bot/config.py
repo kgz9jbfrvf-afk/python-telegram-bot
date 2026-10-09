@@ -15,6 +15,8 @@ class Settings:
     database_url: str
     redis_url: str
     log_level: str = "INFO"
+    facts_times: str = "10:00,19:00"
+    facts_timezone: str = "Europe/Warsaw"
 
     @classmethod
     def from_env(cls) -> "Settings":
@@ -36,4 +38,6 @@ class Settings:
             database_url=database_url,
             redis_url=redis_url,
             log_level=log_level,
+            facts_times=os.getenv("FACTS_TIMES", "10:00,19:00").strip(),
+            facts_timezone=os.getenv("FACTS_TIMEZONE", "Europe/Warsaw").strip(),
         )

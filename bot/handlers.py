@@ -12,7 +12,7 @@ from telegram import ReplyKeyboardMarkup, Update
 from telegram.error import Conflict, NetworkError, TimedOut
 from telegram.ext import Application, CommandHandler, ContextTypes, MessageHandler, filters
 
-from bot import cache, db, game_memory, activity
+from bot import cache, db, game_memory, activity, facts
 
 
 logger = logging.getLogger(__name__)
@@ -63,6 +63,10 @@ PROFILE_MEMORY_PROMPT = """
 """
 
 BOT_COMMANDS = (
+    ("fact", "Случайный факт о Minecraft"),
+    ("facts_on", "Включить ежедневные факты (админ)"),
+    ("facts_off", "Выключить ежедневные факты (админ)"),
+    ("facts_status", "Расписание и режим фактов"),
     ("personality", "Характер Редстоуна"),
     ("activity_status", "Режим инициативы"),
     ("activity_on", "Включить инициативу (админ)"),
@@ -81,15 +85,20 @@ MENU_HELP = "Help"
 MENU_ABOUT = "About"
 MENU_PING = "Ping" 
 
+MENU_FACT = "🎲 Факт о Minecraft"
 MENU_NEWS = "📰 Новости"
 MAIN_MENU_KEYBOARD = ReplyKeyboardMarkup(
-    [[MENU_NEWS], [MENU_HELP, MENU_ABOUT], [MENU_PING]],
+    [[MENU_NEWS, MENU_FACT], [MENU_HELP, MENU_ABOUT], [MENU_PING]],
     resize_keyboard=True,
     is_persistent=True,
     input_field_placeholder="Choose a menu item",
 )
 
 HELP_TEXT = """Команды:
+/fact - Случайный факт о Minecraft (раз в минуту на группу)
+/facts_on - Включить ежедневные факты (администратор)
+/facts_off - Выключить ежедневные факты (администратор)
+/facts_status - Расписание и режим фактов
 /personality - Характер Редстоуна
 /activity_status - Режим инициативы (по умолчанию выключена)
 /activity_on - Включить инициативу (администратор)
@@ -325,7 +334,9 @@ async def menu_button(update: Update, context: ContextTypes.DEFAULT_TYPE) -> Non
         return
 
     text = message.text.strip()
-    if text == MENU_NEWS:
+    if text == MENU_FACT:
+        await facts.fact_command(update, context)
+    elif text == MENU_NEWS:
         await news(update, context)
     elif text == MENU_HELP:
         await help_command(update, context)
@@ -596,6 +607,8 @@ async def set_bot_commands(application: Application) -> None:
 
 def register_handlers(application: Application) -> None:
     for command, callback in (
+        ("fact", facts.fact_command), ("facts_on", facts.facts_on),
+        ("facts_off", facts.facts_off), ("facts_status", facts.facts_status),
         ("personality", activity.personality),
         ("activity_status", activity.activity_status),
         ("activity_on", activity.activity_on),
@@ -609,7 +622,7 @@ def register_handlers(application: Application) -> None:
     application.add_handler(
         MessageHandler(
             HUMAN_MESSAGES & filters.Regex(
-                f"^({MENU_NEWS}|{MENU_HELP}|{MENU_ABOUT}|{MENU_PING})$"
+                f"^({MENU_NEWS}|{MENU_FACT}|{MENU_HELP}|{MENU_ABOUT}|{MENU_PING})$"
             ),
             menu_button,
         )
