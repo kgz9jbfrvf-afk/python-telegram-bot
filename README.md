@@ -20,6 +20,75 @@ A starter Telegram bot project built with [`python-telegram-bot`](https://python
 
 ## Data Stores
 
+### Silent Minecraft group memory
+
+Ordinary group/supergroup text can now create **structured game facts** without
+mentioning the bot and without a reply. The feature uses a local candidate filter
+and deterministic extraction; it makes **zero OpenAI calls** for ambient messages.
+Questions, greetings, negations, ambiguous multi-object statements, long messages,
+and messages containing common credential/contact markers are skipped.
+
+Supported concepts include farms, bases, houses, castles, portals, roads/railways,
+villages, ancient cities, strongholds, dragons, withers, elytra and diamonds.
+Game projects require an explicit Minecraft/Bedrock/Realm/game marker. The parser
+recognizes plans, construction, completion, discoveries and achievements in common
+Russian/English forms, and `100 64 -200`, `100, 64, -200` or `x=100 y=64 z=-200`
+coordinates. An unspecified dimension stays unspecified. Unknown names and
+ambiguous phrasing are deliberately not stored; this is not unrestricted NLP.
+
+Examples:
+
+- `Мы построили ферму на 100, 64, -200` → shared group fact.
+- `Я строю замок` → the sender's personal game fact.
+- `Планирую построить базу` → the sender's plan.
+- `Я победил дракона` → the sender's achievement.
+
+Redis keys are independent of existing profiles and conversation history:
+
+- `redstone:game:group:{chat_id}` — shared world facts.
+- `redstone:game:player:{chat_id}:{user_id}` — only this player's facts in this group.
+
+Only allowlisted concept/state/dimension values and integer game coordinates are
+stored. No ambient message text, names, usernames, project names, contacts or full
+transcripts are retained or sent to OpenAI. Telegram IDs are used only to address
+the appropriate Redis key. Each list holds at most 40 deduplicated facts and expires
+after 90 days without a write. Deduplication, trimming and expiration use one atomic
+Redis Lua script (the Redis account must permit `EVAL`). Up to 10 shared and 10 own
+facts are supplied to an existing `/ask` or mention request; no other player's
+personal game facts are loaded. Recent facts come first and may become outdated.
+
+Commands (in groups only):
+
+| Command | Access |
+| --- | --- |
+| `/game_memory` or `/game_memory group` | Current members: view shared facts |
+| `/game_memory me` | Current members: view their own game facts |
+| `/forget_game_memory group` | Administrators/owner: clear shared facts |
+| `/forget_game_memory me` | Current members: clear only their own game facts |
+
+Membership is checked with Telegram on every command; failed checks deny access.
+These commands never clear another player's facts or the pre-existing conversational
+profiles/history. Future ordinary messages can create new facts after deletion.
+Missing Redis disables collection; failed Redis operations do not interrupt AI
+answers. Memory commands explain unavailability. Messages from bots, channels,
+anonymous senders and edited messages are not collected. Menu and command messages
+are handled before ambient collection.
+
+To receive ordinary group messages, configure **BotFather → /setprivacy → Disable**
+for this bot (or make it an administrator with appropriate group permissions), then
+verify delivery in the group. The application cannot change this Telegram setting.
+Let members know that structured game facts are collected. No Railway configuration
+changes are required or performed by this feature.
+
+Run offline tests in the local virtual environment:
+
+```bash
+python -m pip install -r requirements-dev.txt
+python -m unittest discover -s tests -v
+```
+
+Tests use `unittest`, `fakeredis` and Lua execution; Telegram/OpenAI calls are mocked.
+
 PostgreSQL and Redis are **optional**. When `DATABASE_URL` / `REDIS_URL` are set the bot
 connects on startup; when they are missing, empty, or unreachable it logs a warning and keeps
 running with that backend disabled. This makes local testing easy, while Railway just links

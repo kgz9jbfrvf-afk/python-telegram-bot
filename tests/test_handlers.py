@@ -7,7 +7,7 @@ from unittest.mock import AsyncMock, patch
 from telegram import Update, User
 from telegram.ext import ApplicationBuilder
 
-from bot import handlers
+from bot import game_memory, handlers
 
 
 class MenuTests(unittest.IsolatedAsyncioTestCase):
@@ -51,12 +51,27 @@ class MenuTests(unittest.IsolatedAsyncioTestCase):
             ("/about", handlers.about), ("/ping", handlers.ping),
             ("/news", handlers.news), ("/ask", handlers.ask),
             ("/unknown", handlers.unknown_command),
+            ("/game_memory", game_memory.show_memory),
+            ("/forget_game_memory", game_memory.forget_memory),
             ("@RedstoneBot привет", handlers.mention_ai),
         ):
             with self.subTest(text=text):
                 update = self.make_update(text, application.bot, text.startswith("/"))
                 selected = next(h for h in application.handlers[0] if h.check_update(update))
                 self.assertIs(selected.callback, expected)
+
+    async def test_no_registered_handler_accepts_bot_messages(self):
+        application = ApplicationBuilder().token("123456:test-token").build()
+        self.addAsyncCleanup(application.bot.shutdown)
+        application.bot._bot_user = User(123456, "Redstone", True, username="RedstoneBot")
+        handlers.register_handlers(application)
+        for text in ("/ask", "/news", "/start", "/game_memory", "/forget_game_memory",
+                     "@RedstoneBot вопрос", handlers.MENU_NEWS, "Мы построили ферму"):
+            data = self.make_update(text, application.bot, text.startswith("/")).to_dict()
+            data["message"]["from"]["is_bot"] = True
+            update = Update.de_json(data, application.bot)
+            with self.subTest(text=text):
+                self.assertFalse(any(h.check_update(update) for h in application.handlers[0]))
 
 
 class MemoryCandidateTests(unittest.TestCase):
